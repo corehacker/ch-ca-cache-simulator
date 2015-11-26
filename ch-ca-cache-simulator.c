@@ -16,7 +16,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 #include <stdbool.h>
 
 /********************************* CONSTANTS **********************************/
@@ -172,7 +176,27 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_simulate_bubble_sort(
    bool b_silent,
    uint32_t ui_n);
 
+#ifdef _WIN32
+void usleep(unsigned int usec);
+#endif
+
 /****************************** LOCAL FUNCTIONS *******************************/
+#ifdef _WIN32
+void usleep(unsigned int usec)
+{
+	HANDLE timer;
+	LARGE_INTEGER ft;
+
+	ft.QuadPart = -(10 * (__int64)usec);
+
+	//Timer Funktionen ab WINNT verfügbar 
+	timer = CreateWaitableTimer(NULL, TRUE, NULL);
+	SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
+	WaitForSingleObject(timer, INFINITE);
+	CloseHandle(timer);
+}
+#endif
+
 static CACHESIM_RET_E cachesim_set_alloc_cache(
    CACHE_SET_X **ppx_cache,
    CACHESIM_CACHE_PARAMS_X *px_cache_params)
