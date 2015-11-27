@@ -9,5 +9,5 @@ Computer architecture cache simulator code
 
 Copyright                                                                        
 =========                                                                        
-Copyright Sandeep Prakash (c), 2015                                             
-Sandeep Prakash - 123sandy@gmail.com
+Copyright Corehacker (c), 2015                                             
+Corehacker - 123sandy@gmail.com
