@@ -155,10 +155,22 @@ static CACHESIM_RET_E cachesim_set_fetch_data_to_cache(
    uint32_t ui_data_index,
    uint32_t *pui_cache_set);
 
+static CACHESIM_RET_E cachesim_set_fetch_data_to_cache_v2(
+   CACHE_SET_X *px_cache,
+   uint32_t ui_data_index,
+   uint32_t *pui_cache_set,
+   uint32_t *pui_block_idx);
+
 static bool cachesim_set_lookup_cache(
    CACHE_SET_X *px_cache,
    uint32_t ui_array_idx,
    uint32_t *pui_cache_set);
+
+static bool cachesim_set_lookup_cache_v2(
+   CACHE_SET_X *px_cache,
+   uint32_t ui_array_idx,
+   uint32_t *pui_cache_set,
+   uint32_t *pui_block_idx);
 
 static CACHESIM_RET_E cachesim_set_mapped_cache_simulate(
    CACHE_SET_X *px_cache,
@@ -189,7 +201,6 @@ void usleep(unsigned int usec)
 
 	ft.QuadPart = -(10 * (__int64)usec);
 
-	//Timer Funktionen ab WINNT verfügbar 
 	timer = CreateWaitableTimer(NULL, TRUE, NULL);
 	SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
 	WaitForSingleObject(timer, INFINITE);
@@ -433,6 +444,86 @@ CLEAN_RETURN:
    return e_ret_val;
 }
 
+static CACHESIM_RET_E cachesim_set_fetch_data_to_cache_v2(
+   CACHE_SET_X *px_cache,
+   uint32_t ui_data_index,
+   uint32_t *pui_cache_set,
+   uint32_t *pui_block_idx)
+{
+   CACHESIM_RET_E e_ret_val = eCACHESIM_RET_FAILURE;
+   uint32_t ui_ram_block = 0;
+   uint32_t ui_cache_set = 0;
+   uint32_t ui_ram_block_start_idx = 0;
+   uint32_t ui_ram_block_end_idx = 0;
+   CACHE_SET_DATA_X *px_cache_set_data = NULL;
+   CACHE_BLOCK_X *px_cache_block = NULL;
+   CACHE_BLOCK_METADATA_X  *px_metadata = NULL;
+   uint32_t ui_fetch_index = 0;
+
+   if ((NULL == px_cache) || (NULL == pui_cache_set))
+   {
+      goto CLEAN_RETURN;
+   }
+
+   /*
+    * Map the memory word given the index to the block in the RAM. The RAM block
+    * for this dataset is assumed to start from 0th index.
+    */
+   ui_ram_block = CACHESIM_DIRECT_MAP_MEMORY_TO_RAM_BLOCK (ui_data_index,
+      px_cache->x_cache_params.ui_block_size_words);
+
+   /*
+    * Map the RAM block to the corresponding cache set. This will only determine
+    * cache set in the cache. The code follows for the FIFO implementation
+    * to kick-out the first block which had come into the cache set.
+    */
+   ui_cache_set = CACHESIM_SET_MAP_RAM_BLOCK_TO_CACHE_SET(ui_ram_block,
+      px_cache->ui_configured_no_of_sets);
+
+   px_cache_set_data = &(px_cache->xa_sets[ui_cache_set]);
+
+   /*
+    * The last fetched block keeps track of the head of the FIFO queue. Module
+    * arithmetic is used simulate FIFO. So if its a 4-way associative then the
+    * following is the sequence of blocks in the set that will be replaced:
+    * (initial) 0 - 1 - 2 - 3 - 0 - 1 - 2 - 3 - 0 - ...
+    */
+   if (CACHESIM_MAX_INDEX_VALUE == px_cache_set_data->ui_last_fetched_block)
+   {
+      px_cache_set_data->ui_last_fetched_block = 0;
+   }
+   else
+   {
+      px_cache_set_data->ui_last_fetched_block++;
+      px_cache_set_data->ui_last_fetched_block %=
+            px_cache->ui_no_of_blocks_per_set;
+   }
+
+   /*
+    * Temp variable.
+    */
+   ui_fetch_index = px_cache_set_data->ui_last_fetched_block;
+
+   px_cache_block = &(px_cache_set_data->xa_blocks[ui_fetch_index]);
+   px_metadata = &(px_cache_block->x_metadata);
+
+   /*
+    * Set the metadata for the current indices of the RAM words.
+    */
+   ui_ram_block_start_idx = ui_ram_block
+      * px_cache->x_cache_params.ui_block_size_words;
+   ui_ram_block_end_idx = ui_ram_block_start_idx
+      + px_cache->x_cache_params.ui_block_size_words - 1;
+
+   px_metadata->ui_data_start_idx = ui_ram_block_start_idx;
+   px_metadata->ui_data_end_idx = ui_ram_block_end_idx;
+   *pui_cache_set = ui_cache_set;
+   *pui_block_idx = ui_fetch_index;
+   e_ret_val = eCACHESIM_RET_SUCCESS;
+CLEAN_RETURN:
+   return e_ret_val;
+}
+
 static bool cachesim_set_lookup_cache(
    CACHE_SET_X *px_cache,
    uint32_t ui_array_idx,
@@ -489,6 +580,64 @@ CLEAN_RETURN:
    return b_cache_hit;
 }
 
+static bool cachesim_set_lookup_cache_v2(
+   CACHE_SET_X *px_cache,
+   uint32_t ui_array_idx,
+   uint32_t *pui_cache_set,
+   uint32_t *pui_block_idx)
+{
+   bool b_cache_hit = false;
+   uint32_t ui_i = 0;
+   uint32_t ui_j = 0;
+   CACHE_BLOCK_X *px_cache_block = NULL;
+   CACHE_BLOCK_METADATA_X  *px_metadata = NULL;
+   CACHE_SET_DATA_X *px_set_data = NULL;
+
+   if ((NULL == px_cache) || (NULL == pui_cache_set))
+   {
+      goto CLEAN_RETURN;
+   }
+
+   /*
+    * Loop through all the sets to find the data word in the cache.
+    */
+   for (ui_i = 0; ui_i < px_cache->ui_configured_no_of_sets; ui_i++)
+   {
+      /*
+       * Loop through all the blocks in the set to find the data word in
+       * the cache.
+       */
+      px_set_data = &(px_cache->xa_sets[ui_i]);
+      for (ui_j = 0; ui_j < px_cache->ui_no_of_blocks_per_set; ui_j++)
+      {
+         px_cache_block = &(px_set_data->xa_blocks[ui_j]);
+         px_metadata = &(px_cache_block->x_metadata);
+
+         /*
+          * If the array index is between the start and end indices in the cache
+          * block then it is a cache hit.
+          */
+         if ((px_metadata->ui_data_start_idx <= ui_array_idx)
+            && (px_metadata->ui_data_end_idx >= ui_array_idx))
+         {
+            *pui_cache_set = ui_i;
+            *pui_block_idx = ui_j;
+            b_cache_hit = true;
+            break;
+         }
+      }
+      if (true == b_cache_hit)
+      {
+         break;
+      }
+   }
+   /*
+    * If the loop ends without setting b_cache_hit, then it is a miss.
+    */
+CLEAN_RETURN:
+   return b_cache_hit;
+}
+
 static void cachesim_print_log_header (
    CACHE_SET_X *px_cache)
 {
@@ -503,7 +652,7 @@ static void cachesim_print_log_header (
    ui_width_qualifier = px_cache->ui_no_of_blocks_per_set * 9; //strlen ("%4d-%4d");
    ui_width_qualifier += (px_cache->ui_no_of_blocks_per_set - 1);
 
-   printf ("%4s |", "    ");
+   printf ("%7s |", " RAM Idx");
 
    snprintf ((uca_format_string), sizeof(uca_format_string), " %%%dd |",
       ui_width_qualifier);
@@ -515,9 +664,10 @@ static void cachesim_print_log_header (
 
    }
 
-   printf (" Hit/Miss |\n");
+   printf (" Hit/Miss | Set/Blk Idx |\n");
 
-   printf ("%4s-+", "----");
+
+   printf ("%8s-+", "--------");
 
    (void) memset (uca_format_string, 0x00, sizeof(uca_format_string));
 
@@ -539,6 +689,7 @@ static void cachesim_print_log_header (
    }
 
    printf ("+-%8s-+", "--------");
+   printf ("-%11s-+", "-----------");
 
    printf ("\n");
 }
@@ -558,7 +709,7 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_simulate(
    }
 
    cachesim_print_log_header (px_cache);
-
+#if 0
    for (ui_i = 0; ui_i < 6; ui_i++)
    {
       for (ui_j = ui_i; ui_j < 64; ui_j += 6)
@@ -567,7 +718,12 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_simulate(
          cachesim_set_mapped_cache_access (px_cache, ui_j, 64, b_silent, &x_stats);
       }
    }
-
+#endif
+   for (ui_i = 0; ui_i < 32; ui_i++)
+   {
+	   usleep (CACHESIM_PAUSE_TIME_BW_ACCESSES);
+	   cachesim_set_mapped_cache_access (px_cache, ui_i, 64, b_silent, &x_stats);
+   }
    printf ("Stats:\n"
       "\t ui_total_accesses         : %d\n"
       "\t ui_hit_count              : %d\n"
@@ -597,6 +753,7 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_access (
    CACHE_BLOCK_METADATA_X  *px_metadata = NULL;
    bool b_cache_hit = false;
    uint32_t ui_cache_set = 0;
+   uint32_t ui_block_idx = 0;
    CACHE_BLOCK_X *px_cache_block = NULL;
    uint32_t ui_ram_block = CACHESIM_MAX_INDEX_VALUE;
    bool b_compulsory = false;
@@ -608,7 +765,7 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_access (
 
    if (false == b_silent)
    {
-      printf ("%4d | ", ui_index);
+      printf ("%8d | ", ui_index);
    }
 
    px_stats->ui_total_accesses++;
@@ -616,7 +773,7 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_access (
    /*
     * Check is the data word is present in the cache.
     */
-   b_cache_hit = cachesim_set_lookup_cache (px_cache, ui_index, &ui_cache_set);
+   b_cache_hit = cachesim_set_lookup_cache_v2 (px_cache, ui_index, &ui_cache_set, &ui_block_idx);
    if (true == b_cache_hit)
    {
       px_stats->ui_hit_count++;
@@ -660,8 +817,8 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_access (
       /*
        * Word not present in the cache. Fetch from block from RAM.
        */
-      e_ret_val = cachesim_set_fetch_data_to_cache (px_cache, ui_index,
-         &ui_cache_set);
+      e_ret_val = cachesim_set_fetch_data_to_cache_v2 (px_cache, ui_index,
+         &ui_cache_set, &ui_block_idx);
       if (eCACHESIM_RET_SUCCESS != e_ret_val)
       {
          goto CLEAN_RETURN;
@@ -693,12 +850,12 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_access (
 
       if (true == b_cache_hit)
       {
-         printf ("%8s | %4d |\n", "Hit", ui_cache_set);
+         printf ("%8s | %5d/%5d |\n", "Hit", ui_cache_set, ui_block_idx);
       }
       else
       {
-         printf ("%8s | %4d |\n",
-            (true == b_compulsory) ? "Com Miss" : "Cap Miss", ui_cache_set);
+         printf ("%8s | %5d/%5d |\n",
+            (true == b_compulsory) ? "Com Miss" : "Cap Miss", ui_cache_set, ui_block_idx);
       }
    }
    e_ret_val = eCACHESIM_RET_SUCCESS;
@@ -730,7 +887,7 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_simulate_bubble_sort(
    {
       for (ui_j = 0; ui_j < ui_n - ui_i - 1; ui_j++)
       {
-         // usleep (CACHESIM_PAUSE_TIME_BW_ACCESSES);
+         usleep (CACHESIM_PAUSE_TIME_BW_ACCESSES);
          cachesim_set_mapped_cache_access (px_cache, ui_j, ui_n, b_silent, &x_stats);
          cachesim_set_mapped_cache_access (px_cache, ui_j + 1, ui_n, b_silent, &x_stats);
       }
@@ -808,7 +965,7 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_simulate_max_in_matrix (
          for (ui_j = ((ui_k % 2) * (ui_n / 2));
                ui_j < (ui_n / 2) + ((ui_k % 2) * (ui_n / 2)); ui_j++)
          {
-            // usleep (CACHESIM_PAUSE_TIME_BW_ACCESSES);
+            usleep (CACHESIM_PAUSE_TIME_BW_ACCESSES);
             cachesim_set_mapped_cache_access (px_cache, ((ui_i * ui_n) + ui_j),
                (ui_n * ui_n), b_silent, &x_stats);
             cachesim_set_mapped_cache_access (px_cache, ((ui_i * ui_n) + ui_j),
@@ -888,9 +1045,9 @@ int main ()
    CACHESIM_CACHE_PARAMS_X x_cache_param = {0};
    CACHE_SET_X    *px_set_cache = NULL;
 
-   x_cache_param.ui_associativity = 1;
-   x_cache_param.ui_block_size_words = 4;
-   x_cache_param.ui_cache_size_words = 32;
+   x_cache_param.ui_associativity = 2;
+   x_cache_param.ui_block_size_words = 8;
+   x_cache_param.ui_cache_size_words = 64;
    x_cache_param.ui_word_size_bytes = sizeof(uint32_t);
    e_ret_val = cachesim_set_alloc_cache (&px_set_cache, &x_cache_param);
    if (eCACHESIM_RET_SUCCESS != e_ret_val)
@@ -943,7 +1100,7 @@ int main ()
    }
 
    e_ret_val = cachesim_set_mapped_cache_simulate_bubble_sort (px_set_cache,
-      true, 4096);
+      false, 128);
    if (eCACHESIM_RET_SUCCESS != e_ret_val)
    {
 
@@ -981,5 +1138,6 @@ int main ()
    {
       i_ret_val = 0;
    }
+
    return i_ret_val;
 }
