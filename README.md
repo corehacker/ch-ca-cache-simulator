@@ -5,5 +5,4 @@ ch-ca-cache-simulator
 
 General Information                                                              
 ===================                                                              
-# ch-ca-cache-simulator
 Computer architecture cache simulator code
