@@ -6,3 +6,8 @@ ch-ca-cache-simulator
 General Information                                                              
 ===================                                                              
 Computer architecture cache simulator code
+
+Copyright                                                                        
+=========                                                                        
+Copyright Sandeep Prakash (c), 2015                                             
+Sandeep Prakash - 123sandy@gmail.com
