@@ -111,6 +111,8 @@ typedef struct _CACHESIM_CACHE_ARGS_X
    bool b_simulate_pinning;
 
    bool b_silent;
+
+   uint32_t ui_loop_iterations;
 } CACHESIM_CACHE_ARGS_X;
 
 typedef struct _CACHESIM_SIM_STATS_X
@@ -1061,7 +1063,8 @@ CLEAN_RETURN:
 static CACHESIM_RET_E cachesim_set_mapped_cache_simulate_pinning(
    CACHE_SET_X *px_cache,
    bool b_use_pinning,
-   bool b_silent)
+   bool b_silent,
+   uint32_t ui_loop_iterations)
 {
    CACHESIM_RET_E e_ret_val = eCACHESIM_RET_FAILURE;
    uint32_t ui_k = 0;
@@ -1090,7 +1093,7 @@ static CACHESIM_RET_E cachesim_set_mapped_cache_simulate_pinning(
    }
 #endif
 
-   for (ui_k = 0; ui_k < 400; ui_k++)
+   for (ui_k = 0; ui_k < ui_loop_iterations; ui_k++)
    {
 	   for (ui_i = 0; ui_i < 32; ui_i++)
 	      {
@@ -1346,7 +1349,8 @@ static void cachesim_simulate_pinning (CACHESIM_CACHE_ARGS_X *px_cache_args)
 
 	   }
 
-	   e_ret_val = cachesim_set_mapped_cache_simulate_pinning (px_set_cache, false, b_silent);
+	   e_ret_val = cachesim_set_mapped_cache_simulate_pinning (px_set_cache, false, b_silent,
+			   px_cache_args->ui_loop_iterations);
 	   if (eCACHESIM_RET_SUCCESS != e_ret_val)
 	   {
 
@@ -1370,7 +1374,8 @@ static void cachesim_simulate_pinning (CACHESIM_CACHE_ARGS_X *px_cache_args)
 
 		   }
 
-		   e_ret_val = cachesim_set_mapped_cache_simulate_pinning (px_set_cache, true, b_silent);
+		   e_ret_val = cachesim_set_mapped_cache_simulate_pinning (px_set_cache, true, b_silent,
+				   px_cache_args->ui_loop_iterations);
 		   if (eCACHESIM_RET_SUCCESS != e_ret_val)
 		   {
 
@@ -1401,6 +1406,7 @@ static void cachesim_get_opts_from_args (int argc, char **argv,
 		  {"simulate-algorithm",          required_argument, NULL, 's'},
 		  {"simulate-pinning",          required_argument, NULL, 'p'},
 		  {"silent",          required_argument, NULL, 'l'},
+		  {"loop-iterations",          required_argument, NULL, 'i'},
 	      {NULL,            0,                 NULL, 0  }
 	   };
 	   const char *long_opt_description[] =
@@ -1412,7 +1418,8 @@ static void cachesim_get_opts_from_args (int argc, char **argv,
 			   "(default=4) Word Size",
 			   "(default=general)Simulation Algorithm - general|bubble-sort|max-in-matrix",
 			   "(default=false) Simulate Pinning (works only with general simulation algorithm",
-			   "(defatul=true) Log each memory access and cache details as one line"
+			   "(defatul=true) Log each memory access and cache details as one line",
+			   "(default=1) Number iterations of the general simulation"
 	   };
 	   ui_opts_count = sizeof(long_opt) / sizeof (struct option);
 	while ((c = getopt_long(argc, argv, short_opt, long_opt, NULL)) != -1) {
@@ -1494,6 +1501,11 @@ static void cachesim_get_opts_from_args (int argc, char **argv,
 												true;
 									}
 			break;
+		case 'i':
+			printf("you entered \"%s\"\n", optarg);
+						px_cache_args->ui_loop_iterations = atoi(optarg);
+						break;
+			break;
 		default:
 			fprintf(stderr, "%s: invalid option -- %c\n", argv[0], c);
 			fprintf(stderr, "Try `%s --help' for more information.\n", argv[0]);
@@ -1531,6 +1543,8 @@ static void cachesim_get_opts_from_args (int argc, char **argv,
 		px_cache_args->ui_word_size_bytes = sizeof(uint32_t);
 	if (eCACHESIM_SIMULATION_ALGORITHM_INVALID == px_cache_args->e_algorithm)
 		px_cache_args->e_algorithm = eCACHESIM_SIMULATION_ALGORITHM_GENERAL;
+	if (0 == px_cache_args->ui_loop_iterations)
+			px_cache_args->ui_loop_iterations = 1;
 }
 
 int main (int argc, char **argv)
